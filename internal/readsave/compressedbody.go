@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
-	"fmt"
 	"io"
 )
 
@@ -30,24 +29,28 @@ func (body *CompressedSaveFileBody) isValid() bool {
 		body.UncompressedSize1 == body.UncompressedSize2
 }
 
-func readCompressedSaveFileBody(file io.Reader) (io.ReadCloser, uint64, error) {
+func readCompressedSaveFileBody(file io.Reader) (io.ReadCloser, uint64) {
 	var compressedBody CompressedSaveFileBody
 	if err := binary.Read(file, binary.LittleEndian, &compressedBody); err != nil {
-		return nil, 0, err
+		if err == io.EOF {
+			return nil, 0
+		}
+		panic(err)
 	}
 	if !compressedBody.isValid() {
-		return nil, 0, fmt.Errorf("invalid compressed save file body header: %+v", compressedBody)
+		panic("invalid compressed save file body")
 	}
 
 	compressedBytes := make([]byte, compressedBody.CompressedSize1)
 	if _, err := io.ReadFull(file, compressedBytes); err != nil {
-		return nil, 0, fmt.Errorf("reading compressed body: %w", err)
+		panic("reading compressed body: " + err.Error())
 	}
 
 	b := bytes.NewReader(compressedBytes)
 	zr, err := zlib.NewReader(b)
 	if err != nil {
-		return nil, 0, fmt.Errorf("creating zlib reader: %w", err)
+		panic("creating zlib reader: " + err.Error())
 	}
-	return zr, compressedBody.UncompressedSize1, nil
+
+	return zr, compressedBody.UncompressedSize1
 }

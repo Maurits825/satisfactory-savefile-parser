@@ -2,7 +2,6 @@ package readfields
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 
 	"github.com/Maurits825/satisfactory-savefile-parser/internal/countingreader"
@@ -204,20 +203,20 @@ type Identity struct {
 	Data     []byte
 }
 
-func ReadAllProperties(r io.Reader, props *[]saveformat.Property) {
+func ReadAllProperties(cr *countingreader.CountingReader, props *[]saveformat.Property) {
 	for {
 		var p saveformat.Property
-		ReadFields(r, &p.Name)
+		ReadFields(cr, &p.Name)
 		if p.Name == "None" {
 			*props = append(*props, p)
 			return
 		} else if p.Name == "" {
 			//there can be a buggy byte on InventoryItem...
-			ReadFields(r, &p.Name)
+			ReadFields(cr, &p.Name)
 		}
 
-		ReadFields(r, &p.Type)
-		p.Value = readPropertyData(p.Type, r)
+		ReadFields(cr, &p.Type)
+		p.Value = readPropertyData(cr, p.Type)
 		*props = append(*props, p)
 	}
 }
@@ -228,64 +227,64 @@ func eatPropertyData(r io.Reader, pSize uint32) {
 	}
 }
 
-func readPropertyData(propertyType string, r io.Reader) any {
+func readPropertyData(cr *countingreader.CountingReader, propertyType string) any {
 	if genericReader, ok := genericPropertyReaders[propertyType]; ok {
-		return genericReader(r)
+		return genericReader(cr)
 	}
 
 	//TODO return p? instead of p.value, so we get all the data?
 	switch propertyType {
 	case "BoolProperty":
 		var p BoolProperty
-		ReadFields(r, &p.Padding1, &p.Index, &p.Value, &p.Padding2)
+		ReadFields(cr, &p.Padding1, &p.Index, &p.Value, &p.Padding2)
 		return p.Value
 	case "ByteProperty":
 		var p ByteProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Type, &p.Padding)
+		ReadFields(cr, &p.Size, &p.Index, &p.Type, &p.Padding)
 		if p.Type == "None" {
 			var b byte
-			ReadFields(r, &b)
+			ReadFields(cr, &b)
 			p.Value = b
 		} else {
 			var s string
-			ReadFields(r, &s)
+			ReadFields(cr, &s)
 			p.Value = s
 		}
 		return p.Value
 	case "ObjectProperty":
 		var p ObjectProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Padding, &p.Value)
+		ReadFields(cr, &p.Size, &p.Index, &p.Padding, &p.Value)
 		return p.Value
 	case "SoftObjectProperty":
 		var p SoftObjectProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Padding, &p.ObjectReferenceValue, &p.Value)
+		ReadFields(cr, &p.Size, &p.Index, &p.Padding, &p.ObjectReferenceValue, &p.Value)
 		return p.Value
 	case "SetProperty":
 		var p SetProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Type, &p.Padding1)
-		eatPropertyData(r, p.Size)
+		ReadFields(cr, &p.Size, &p.Index, &p.Type, &p.Padding1)
+		eatPropertyData(cr, p.Size)
 		return nil
 	case "StructProperty":
 		var p StructProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Type, &p.Padding1, &p.Padding2, &p.Padding3)
-		p.Value = readTypedData(r, p.Type)
+		ReadFields(cr, &p.Size, &p.Index, &p.Type, &p.Padding1, &p.Padding2, &p.Padding3)
+		p.Value = readTypedData(cr, p.Type)
 		return p.Value
 	case "ArrayProperty":
-		return readArrayProperty(r)
+		return readArrayProperty(cr)
 	case "EnumProperty":
 		var p EnumProperty
-		ReadFields(r, &p.Size, &p.Index, &p.Type, &p.Padding)
-		eatPropertyData(r, p.Size)
+		ReadFields(cr, &p.Size, &p.Index, &p.Type, &p.Padding)
+		eatPropertyData(cr, p.Size)
 		return nil
 	case "MapProperty":
 		var p MapProperty
-		ReadFields(r, &p.Size, &p.Index, &p.KeyType, &p.ValueType, &p.Padding)
-		eatPropertyData(r, p.Size)
+		ReadFields(cr, &p.Size, &p.Index, &p.KeyType, &p.ValueType, &p.Padding)
+		eatPropertyData(cr, p.Size)
 		return nil
 	case "TextProperty":
 		var pSize uint32
-		ReadFields(r, &pSize)
-		eatPropertyData(r, pSize+5)
+		ReadFields(cr, &pSize)
+		eatPropertyData(cr, pSize+5)
 		return nil
 	default:
 		panic("not implemented property type: " + propertyType)
@@ -302,87 +301,76 @@ func readArrayValues[T any](r io.Reader, length uint32) []T {
 	return values
 }
 
-func readArrayStructProperty(r io.Reader, length uint32) ArrayStructProperty {
+func readArrayStructProperty(cr *countingreader.CountingReader, length uint32) ArrayStructProperty {
 	var p ArrayStructProperty
-	ReadFields(r, &p.Name, &p.Type, &p.Size, &p.Padding, &p.ElementType,
+	ReadFields(cr, &p.Name, &p.Type, &p.Size, &p.Padding, &p.ElementType,
 		&p.Padding1, &p.Padding2, &p.Padding3, &p.Padding4, &p.PaddingByte,
 	)
-	startPos := r.(*countingreader.CountingReader).Position()
-	for range length {
-		value := readTypedData(r, p.ElementType)
-		p.Value = append(p.Value, value)
-	}
-	endPos := r.(*countingreader.CountingReader).Position()
-	bytesRead := uint32(endPos - startPos)
 
-	structSize := p.Size
-	if bytesRead < structSize {
-		trailingBytes := structSize - bytesRead
-		if trailingBytes != 0 {
-			if _, err := io.CopyN(io.Discard, r, int64(trailingBytes)); err != nil {
-				panic(err)
-			}
+	read := func() uint32 {
+		for range length {
+			value := readTypedData(cr, p.ElementType)
+			p.Value = append(p.Value, value)
 		}
-	} else if bytesRead > structSize {
-		fmt.Println("Warning: read more bytes than expected ArrayStructProp")
+		return p.Size
 	}
-
+	countingreader.ReadAndYeet(cr, read)
 	return p
 }
 
-func readTypedData(r io.Reader, elementType string) any {
+func readTypedData(cr *countingreader.CountingReader, elementType string) any {
 	var value any
 	switch elementType {
 	case "Box":
 		var v Box
-		ReadFields(r, &v.MinX, &v.MinY, &v.MinZ, &v.MaxX, &v.MaxY, &v.MaxZ, &v.IsValid)
+		ReadFields(cr, &v.MinX, &v.MinY, &v.MinZ, &v.MaxX, &v.MaxY, &v.MaxZ, &v.IsValid)
 		value = v
 	case "FluidBox":
 		var v FluidBox
-		ReadFields(r, &v.Value)
+		ReadFields(cr, &v.Value)
 		value = v
 	case "Vector":
 		var v Vector
-		ReadFields(r, &v.X, &v.Y, &v.Z)
+		ReadFields(cr, &v.X, &v.Y, &v.Z)
 		value = v
 	case "DateTime":
 		var v DateTime
-		ReadFields(r, &v.Timestamp)
+		ReadFields(cr, &v.Timestamp)
 		value = v
 	case "InventoryItem":
 		var v InventoryItem
-		ReadFields(r, &v.Reference, &v.ItemHasProperties)
+		ReadFields(cr, &v.Reference, &v.ItemHasProperties)
 
 		if v.ItemHasProperties != 0 {
-			ReadFields(r, &v.ItemType, &v.PropertySize)
-			ReadAllProperties(r, &v.Properties)
+			ReadFields(cr, &v.ItemType, &v.PropertySize)
+			ReadAllProperties(cr, &v.Properties)
 		}
 		value = v
 	case "LinearColor":
 		var v LinearColor
-		ReadFields(r, &v.R, &v.G, &v.B, &v.A)
+		ReadFields(cr, &v.R, &v.G, &v.B, &v.A)
 		value = v
 	case "Quat":
 		var v Quat
-		ReadFields(r, &v.X, &v.Y, &v.Z, &v.W)
+		ReadFields(cr, &v.X, &v.Y, &v.Z, &v.W)
 		value = v
 	case "RailroadTrackPosition":
 		var v RailroadTrackPosition
-		ReadFields(r, &v.ObjectRef, &v.Offset, &v.Forward)
+		ReadFields(cr, &v.ObjectRef, &v.Offset, &v.Forward)
 		value = v
 	case "Guid":
 		//todo hex type? we will need the length
 		var v1, v2 int64
-		ReadFields(r, &v1, &v2)
+		ReadFields(cr, &v1, &v2)
 		value = v1
 	case "ClientIdentityInfo":
 		var v ClientIdentityInfo
-		ReadFields(r, &v.UUID, &v.IdentityCount)
+		ReadFields(cr, &v.UUID, &v.IdentityCount)
 		for range v.IdentityCount {
 			var id Identity
-			ReadFields(r, &id.Type, &id.DataSize)
+			ReadFields(cr, &id.Type, &id.DataSize)
 			id.Data = make([]byte, id.DataSize)
-			err := binary.Read(r, binary.LittleEndian, &id.Data)
+			err := binary.Read(cr, binary.LittleEndian, &id.Data)
 			if err != nil {
 				panic(err)
 			}
@@ -391,37 +379,37 @@ func readTypedData(r io.Reader, elementType string) any {
 		value = v
 	default:
 		props := make([]saveformat.Property, 0)
-		ReadAllProperties(r, &props)
+		ReadAllProperties(cr, &props)
 		value = props
 	}
 	return value
 }
 
-func readArrayProperty(r io.Reader) any {
+func readArrayProperty(cr *countingreader.CountingReader) any {
 	var p ArrayProperty
-	ReadFields(r, &p.Size, &p.Index, &p.Type, &p.Padding, &p.Length)
+	ReadFields(cr, &p.Size, &p.Index, &p.Type, &p.Padding, &p.Length)
 
 	var values any
 	switch p.Type {
 	case "ByteProperty":
-		values = readArrayValues[byte](r, p.Length)
+		values = readArrayValues[byte](cr, p.Length)
 	case "EnumProperty", "StrProperty":
-		values = readArrayValues[string](r, p.Length)
+		values = readArrayValues[string](cr, p.Length)
 	case "ObjectProperty", "InterfaceProperty":
-		values = readArrayValues[saveformat.ObjectReference](r, p.Length)
+		values = readArrayValues[saveformat.ObjectReference](cr, p.Length)
 	case "IntProperty":
-		values = readArrayValues[int32](r, p.Length)
+		values = readArrayValues[int32](cr, p.Length)
 	case "Int64Property":
-		values = readArrayValues[int64](r, p.Length)
+		values = readArrayValues[int64](cr, p.Length)
 	case "FloatProperty":
-		values = readArrayValues[float32](r, p.Length)
+		values = readArrayValues[float32](cr, p.Length)
 	case "SoftObjectProperty":
-		values = readArrayValues[ArraySoftObjectProperty](r, p.Length)
+		values = readArrayValues[ArraySoftObjectProperty](cr, p.Length)
 	case "StructProperty":
-		values = readArrayStructProperty(r, p.Length)
+		values = readArrayStructProperty(cr, p.Length)
 
 	default:
-		eatPropertyData(r, p.Size-4)
+		eatPropertyData(cr, p.Size-4)
 	}
 
 	return values

@@ -20,14 +20,11 @@ func ReadSave(file *os.File) *saveformat.SaveFileBody {
 	totalSize := uint64(0)
 	fmt.Println("Decompressing save file body")
 	for {
-		zr, size, err := readCompressedSaveFileBody(file)
-		totalSize += size
-		if err == io.EOF {
+		zr, size := readCompressedSaveFileBody(file)
+		if size == 0 {
 			break
-		} else if err != nil {
-			fmt.Println("Error reading compressed save file body:", err)
-			return nil
 		}
+		totalSize += size
 		readers = append(readers, zr)
 	}
 
@@ -38,11 +35,7 @@ func ReadSave(file *os.File) *saveformat.SaveFileBody {
 	statusUpdate := newStatusTicker(1*time.Second, func() { statusPrint(cr, totalSize, startTime) })
 	statusUpdate.start()
 
-	body, err := readSaveFileBody(cr, header.SaveVersion)
-	if err != nil {
-		fmt.Println("reading save file body: %w", err)
-		return nil
-	}
+	body := readSaveFileBody(cr, header.SaveVersion)
 
 	statusUpdate.stop()
 	tDiff := float64(time.Since(startTime).Seconds())
