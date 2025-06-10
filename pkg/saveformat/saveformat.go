@@ -144,3 +144,25 @@ func (c *ComponentObject) IsValid() bool {
 		c.Size > 0 && c.Zero == 0 &&
 		lastProp.Name == "None" && lastProp.Type == ""
 }
+
+type ArrayStructProperty struct {
+	Name        string
+	Type        string
+	Size        uint32
+	Padding     uint32
+	ElementType string
+	Padding1    uint32
+	Padding2    uint32
+	Padding3    uint32
+	Padding4    uint32
+	PaddingByte byte
+	Value       []any
+}
+
+type InventoryItem struct {
+	Reference         ObjectReference
+	ItemHasProperties uint32
+	ItemType          ObjectReference
+	PropertySize      uint32
+	Properties        []Property
+}

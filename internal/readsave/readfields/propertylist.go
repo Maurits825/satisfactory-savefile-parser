@@ -125,20 +125,6 @@ type ArraySoftObjectProperty struct {
 	Value     uint32
 }
 
-type ArrayStructProperty struct {
-	Name        string
-	Type        string
-	Size        uint32
-	Padding     uint32
-	ElementType string
-	Padding1    uint32
-	Padding2    uint32
-	Padding3    uint32
-	Padding4    uint32
-	PaddingByte byte
-	Value       []any
-}
-
 type Box struct {
 	MinX    float64
 	MinY    float64
@@ -151,14 +137,6 @@ type Box struct {
 
 type FluidBox struct {
 	Value float32
-}
-
-type InventoryItem struct {
-	Reference         saveformat.ObjectReference
-	ItemHasProperties uint32
-	ItemType          saveformat.ObjectReference
-	PropertySize      uint32
-	Properties        []saveformat.Property
 }
 
 type LinearColor struct {
@@ -301,8 +279,8 @@ func readArrayValues[T any](r io.Reader, length uint32) []T {
 	return values
 }
 
-func readArrayStructProperty(cr *countingreader.CountingReader, length uint32) ArrayStructProperty {
-	var p ArrayStructProperty
+func readArrayStructProperty(cr *countingreader.CountingReader, length uint32) saveformat.ArrayStructProperty {
+	var p saveformat.ArrayStructProperty
 	ReadFields(cr, &p.Name, &p.Type, &p.Size, &p.Padding, &p.ElementType,
 		&p.Padding1, &p.Padding2, &p.Padding3, &p.Padding4, &p.PaddingByte,
 	)
@@ -338,7 +316,7 @@ func readTypedData(cr *countingreader.CountingReader, elementType string) any {
 		ReadFields(cr, &v.Timestamp)
 		value = v
 	case "InventoryItem":
-		var v InventoryItem
+		var v saveformat.InventoryItem
 		ReadFields(cr, &v.Reference, &v.ItemHasProperties)
 
 		if v.ItemHasProperties != 0 {
