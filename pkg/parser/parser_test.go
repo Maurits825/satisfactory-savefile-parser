@@ -1,13 +1,15 @@
-package main
+package parser_test
 
 import (
 	"path/filepath"
 	"testing"
+
+	. "github.com/Maurits825/satisfactory-savefile-parser/pkg/parser"
 )
 
 func testReadSaveFile(file string, t *testing.T) {
 	saveFile := filepath.Join("testdata", file)
-	body := readSaveFile(saveFile)
+	body := ParseSaveFile(saveFile)
 	if body == nil {
 		t.Error(file, "Body is nil")
 		return

@@ -1,4 +1,4 @@
-package main
+package readfields
 
 import (
 	"encoding/binary"
@@ -6,7 +6,42 @@ import (
 	"io"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/Maurits825/satisfactory-savefile-parser/pkg/saveformat"
 )
+
+func ReadFields(r io.Reader, fields ...any) {
+	for _, field := range fields {
+		switch field := field.(type) {
+		case *string:
+			s, err := readString(r)
+			if err != nil {
+				panic("Error reading string field: " + err.Error())
+			}
+			*field = s
+		case *saveformat.ObjectReference:
+			ReadFields(r, &field.LevelName, &field.PathName)
+		case *ArraySoftObjectProperty:
+			ReadFields(r, &field.Reference, &field.Value)
+		case nil:
+			continue
+		case []any:
+			ReadFields(r, field...)
+		default:
+			err := binary.Read(r, binary.LittleEndian, field)
+			if err != nil {
+				panic("Error reading field: " + err.Error())
+			}
+		}
+	}
+}
+
+func ConditionalFields(useValue bool, fields ...any) any {
+	if useValue {
+		return fields
+	}
+	return nil
+}
 
 func readString(r io.Reader) (string, error) {
 	var length int32
@@ -60,36 +95,4 @@ func readString(r io.Reader) (string, error) {
 		// Decode UTF-16 to string
 		return string(utf16.Decode(utf16Data)), nil
 	}
-}
-func readFields(r io.Reader, fields ...any) {
-	for _, field := range fields {
-		switch field := field.(type) {
-		case *string:
-			s, err := readString(r)
-			if err != nil {
-				panic("Error reading string field: " + err.Error())
-			}
-			*field = s
-		case *ObjectReference:
-			readFields(r, &field.LevelName, &field.PathName)
-		case *ArraySoftObjectProperty:
-			readFields(r, &field.Reference, &field.Value)
-		case nil:
-			continue
-		case []any:
-			readFields(r, field...)
-		default:
-			err := binary.Read(r, binary.LittleEndian, field)
-			if err != nil {
-				panic("Error reading field: " + err.Error())
-			}
-		}
-	}
-}
-
-func conditionalFields(useValue bool, fields ...any) any {
-	if useValue {
-		return fields
-	}
-	return nil
 }
